@@ -152,7 +152,10 @@ module emu
 //`define DEBUG
 
 assign ADC_BUS  = 'Z;
-assign USER_OUT = '1;
+assign USER_OUT[0] = '1;
+assign USER_OUT[3] = '1;
+assign USER_OUT[5] = '1;
+assign USER_OUT[6] = '1;
 assign {SDRAM_A, SDRAM_BA, SDRAM_DQ, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
@@ -621,13 +624,13 @@ system system
 	.hdd1_request         (mgmt_req[5:3]),
 	.fdd0_request         (mgmt_req[7:6]),
 
-	.serial_rx            (UART_RXD),
-	.serial_tx            (UART_TXD),
-	.serial_cts_n         (UART_CTS),
-	.serial_dcd_n         (UART_DSR),
-	.serial_dsr_n         (UART_DSR),
-	.serial_rts_n         (UART_RTS),
-	.serial_dtr_n         (UART_DTR),
+	.serial_rx            (USER_IN[0]),
+	.serial_tx            (USER_OUT[1]),
+	.serial_cts_n         (USER_IN[3]),
+	.serial_dcd_n         (USER_IN[6]),
+	.serial_dsr_n         (USER_IN[5]),
+	.serial_rts_n         (USER_OUT[2]),
+	.serial_dtr_n         (USER_OUT[4]),
 	.serial_midi_rate     (midi_en),
 
 	.memcfg               (memcfg),
