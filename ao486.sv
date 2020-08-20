@@ -186,21 +186,32 @@ localparam CONF_STR =
 	"-;",
 	"OX2,Boot order,FDD/HDD,HDD/FDD;",
 	"-;",
-	"O1,Aspect ratio,4:3,16:9;",
-	"O4,VSync,60Hz,Variable;",
-	"O8,16/24bit mode,BGR,RGB;",
-	"O9,16bit format,1555,565;",
-	"-;",
-	"O3,FM mode,OPL2,OPL3;",
+	
+	"P1,Audio & Video;",
+	"P1-;",
+	"P1O1,Aspect ratio,4:3,16:9;",
+	"P1O4,VSync,60Hz,Variable;",
+	"P1O8,16/24bit mode,BGR,RGB;",
+	"P1O9,16bit format,1555,565;",
+	"P1OE,Low-Res,Native,4x;",
+	"P1-;",
+	"P1O3,FM mode,OPL2,OPL3;",
+
+	"P2,Hardware;",
+	"P2-;",
+	"P2OB,RAM Size,256MB,16MB;",
+`ifndef DEBUG
+	"P2-;",
+	"D2D1P2O56,CPU Clock,90MHz,15MHz,30MHz,56MHz;",
+	"h0P2O7,Overclock,Off,100Mhz;",
+	"D2P2OF,L1 Cache,On,Off;",
+	"D2P2OG,L2 Cache,On,Off;",
+	"P2-;",
+	"P2OA,UART Speed,Normal,30x;",
+`endif
+
 	"-;",
 	"OCD,Joystick type,2 Buttons,4 Buttons,Gravis Pro;",
-	"-;",
-	"OB,RAM Size,256MB,16MB;",
-`ifndef DEBUG
-	"D1O56,Speed,90MHz,15MHz,30MHz,56MHz;",
-	"h0O7,Turbo 100Mhz,Off,On;",
-	"OA,UART Speed,Normal,30x;",
-`endif
 	"-;",
 	"R0,Reset and apply HDD;",
 	"J,Button 1,Button 2,Button 3,Button 4,Start,Select,R1,L1,R2,L2;",
@@ -252,7 +263,7 @@ hps_io #(.STRLEN(($size(CONF_STR))>>3), .PS2DIV(4000), .PS2WE(1), .WIDE(1)) hps_
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({status[7],dbg_menu}),
+	.status_menumask({syscfg[7],status[7],dbg_menu}),
 	.new_vmode(status[4]),
 	.gamma_bus(gamma_bus),
 
@@ -348,11 +359,13 @@ pll_cfg pll_cfg
 	.reconfig_from_pll(reconfig_from_pll)
 );
 
+wire [2:0] clk_req = {status[7], syscfg[7] ? syscfg[1:0] : status[6:5]};
+
 reg [2:0] speed;
 always @(posedge CLK_50M) begin
 	reg [2:0] sp1, sp2;
 	
-	sp1 <= status[7:5];
+	sp1 <= clk_req;
 	sp2 <= sp1;
 	
 	if(sp2 == sp1) speed <= sp2;
@@ -418,7 +431,7 @@ always @(posedge CLK_50M) begin
 	end
 end
 
-always @(posedge clk_sys) cur_rate <= clk_rate[status[7:5]];
+always @(posedge clk_sys) cur_rate <= clk_rate[clk_req];
 
 `endif
 
@@ -501,12 +514,13 @@ wire  [3:0] vga_flags;
 wire        vga_off;
 wire        vga_ce;
 wire        vga_de;
+wire        vga_lores = ~status[14];
 
 reg vga_out_en;
 always @(posedge clk_vga) begin
 	reg old_hs, old_vs;
 	
-	if(vga_flags[3]) begin
+	if(vga_flags[3] & vga_lores) begin
 		old_hs <= HSync;
 		if(~old_hs & HSync) begin
 			old_vs <= VSync;
@@ -567,6 +581,10 @@ system system
 
 	.clock_rate           (cur_rate),
 
+	.syscfg               (syscfg),
+	.l1_disable           (syscfg[7] ? syscfg[4] : status[15]),
+	.l2_disable           (syscfg[7] ? syscfg[5] : status[16]),
+
 	.video_ce             (vga_ce),
 	.video_f60            (~status[4] | f60),
 	.video_blank_n        (vga_de),
@@ -587,6 +605,7 @@ system system
 	.video_flags          (vga_flags),
 	.video_off            (vga_off),
 	.video_fb_en          (fb_en),
+	.video_lores          (vga_lores),
 
 	.sound_sample_l       (sb_out_l),
 	.sound_sample_r       (sb_out_r),
@@ -646,6 +665,8 @@ system system
 	.DDRAM_RD             (DDRAM_RD),
 	.DDRAM_WE             (DDRAM_WE)
 );
+
+wire [7:0] syscfg;
 
 reg memcfg = 0;
 always @(posedge clk_sys) if(cpu_reset) memcfg <= status[11];
