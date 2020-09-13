@@ -32,7 +32,7 @@ module floppy
 	//dma
 	output              dma_req,
 	input               dma_ack,
-	input               dma_terminal,
+	input               dma_tc,
 	input       [7:0]   dma_readdata,
 	output      [7:0]   dma_writedata,
 
@@ -117,52 +117,28 @@ always @(posedge clk) io_readdata <= io_readdata_prepare;
 //------------------------------------------------------------------------------ media management
 
 reg media_present;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_present <= 1'b0;
-    else if(mgmt_write && mgmt_address == 4'd0) media_present <= mgmt_writedata[0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd0) media_present <= mgmt_writedata[0];
 
 reg media_writeprotected;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_writeprotected <= 1'b0;
-    else if(mgmt_write && mgmt_address == 4'd1) media_writeprotected <= mgmt_writedata[0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd1) media_writeprotected <= mgmt_writedata[0];
 
 reg [7:0] media_cylinders;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_cylinders <= 8'd0;
-    else if(mgmt_write && mgmt_address == 4'd2) media_cylinders <= mgmt_writedata[7:0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd2) media_cylinders <= mgmt_writedata[7:0];
 
 reg [7:0] media_sectors_per_track;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_sectors_per_track <= 8'd0;
-    else if(mgmt_write && mgmt_address == 4'd3) media_sectors_per_track <= mgmt_writedata[7:0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd3) media_sectors_per_track <= mgmt_writedata[7:0];
 
 reg [31:0] media_sector_count;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_sector_count <= 32'd0;
-    else if(mgmt_write && mgmt_address == 4'd4) media_sector_count <= mgmt_writedata;
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd4) media_sector_count <= mgmt_writedata;
 
 reg [1:0] media_heads;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_heads <= 2'd2;
-    else if(mgmt_write && mgmt_address == 4'd5) media_heads <= mgmt_writedata[1:0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd5) media_heads <= mgmt_writedata[1:0];
 
 reg [31:0] media_sd_base;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_sd_base <= 32'd0;
-    else if(mgmt_write && mgmt_address == 4'd6) media_sd_base <= mgmt_writedata;
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'd6) media_sd_base <= mgmt_writedata;
 
 reg [7:0] media_type;
-always @(posedge clk) begin
-    if(rst_n == 1'b0)                           media_type <= 8'h20;
-    else if(mgmt_write && mgmt_address == 4'hC) media_type <= mgmt_writedata[7:0];
-end
+always @(posedge clk) if(mgmt_write && mgmt_address == 4'hC) media_type <= mgmt_writedata[7:0];
 
 //------------------------------------------------------------------------------
 
@@ -417,7 +393,7 @@ end
 
 wire cmd_read_write_finish =
     (cmd_read_normal_in_progress || cmd_write_normal_in_progress) && (
-        (~(execute_ndma) && was_dma_terminal) ||
+        (~(execute_ndma) && dma_has_terminated) ||
         (execute_ndma && cmd_read_write_was_ndma_terminal)
 );
 
@@ -618,7 +594,7 @@ always @(posedge clk) begin
     else if(state == S_SD_FORMAT_WAIT_FOR_FILL && sd_read_counter == 9'd511 && sd_slave_read_valid) format_sector_count <= format_sector_count - 8'd1;
 end
 
-wire cmd_format_in_input_finish = ~(execute_ndma) && was_dma_terminal;
+wire cmd_format_in_input_finish = ~(execute_ndma) && dma_has_terminated;
 
 wire cmd_format_finish = cmd_format_in_progress && (
     cmd_format_in_input_finish ||
@@ -850,17 +826,17 @@ end
 
 assign dma_writedata = from_floppy_q;
 
-assign dma_req = ~(execute_ndma) && ~(was_dma_terminal) && dma_irq_enable && ~(dma_ack) && (
+assign dma_req = ~(execute_ndma) && ~(dma_has_terminated) && dma_irq_enable && ~(dma_ack) && (
     (cmd_read_normal_in_progress  && ~(from_floppy_empty) && state == S_WAIT_FOR_EMPTY_READ_FIFO) ||
     (cmd_write_normal_in_progress && to_floppy_count <= 11'd511 && state == S_WAIT_FOR_FULL_WRITE_FIFO) ||
     (cmd_format_in_progress       && format_data_count < 3'd4 && state == S_WAIT_FOR_FORMAT_INPUT)
 );
 
-reg was_dma_terminal;
+reg dma_has_terminated;
 always @(posedge clk) begin
-    if(rst_n == 1'b0)               was_dma_terminal <= 1'd0;
-    else if(state == S_IDLE)        was_dma_terminal <= 1'd0;
-    else if(dma_terminal)    was_dma_terminal <= 1'd1;
+    if(rst_n == 1'b0)        dma_has_terminated <= 1'd0;
+    else if(state == S_IDLE) dma_has_terminated <= 1'd0;
+    else if(dma_tc)          dma_has_terminated <= 1'd1;
 end
 
 //------------------------------------------------------------------------------ fifo
@@ -888,8 +864,8 @@ fifo_to_floppy_inst(
     
     .sclr       (state == S_IDLE), //input
     
-    .data       ((execute_ndma)? io_writedata : (was_dma_terminal)? 8'h00 : dma_readdata),                                                                                           //input [7:0]
-    .wrreq      (state == S_WAIT_FOR_FULL_WRITE_FIFO && (write_in_io_mode || (~(execute_ndma) && dma_ack) || (~(execute_ndma) && was_dma_terminal)) && to_floppy_count < 11'd512),   //input
+    .data       ((execute_ndma)? io_writedata : (dma_has_terminated)? 8'h00 : dma_readdata),                                                                                           //input [7:0]
+    .wrreq      (state == S_WAIT_FOR_FULL_WRITE_FIFO && (write_in_io_mode || (~(execute_ndma) && dma_ack) || (~(execute_ndma) && dma_has_terminated)) && to_floppy_count < 11'd512),   //input
     .full       (to_floppy_full),   //output
     
     .rdreq      (sd_slave_read_valid),  //input
@@ -910,7 +886,7 @@ fifo_from_floppy_inst(
     .clk        (clk),
     .rst_n      (rst_n),
     
-     .sclr      (state == S_IDLE || (state == S_WAIT_FOR_EMPTY_READ_FIFO && ~(execute_ndma) && dma_terminal)),   //input
+     .sclr      (state == S_IDLE || (state == S_WAIT_FOR_EMPTY_READ_FIFO && ~(execute_ndma) && dma_tc)),   //input
     
     .data       (mgmt_writedata[7:0]),   //input [7:0]
     .wrreq      (mgmt_write && &mgmt_address),       //input

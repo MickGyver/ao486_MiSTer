@@ -150,10 +150,11 @@ module memory(
     input       [31:0]  avm_readdata,
     
     input       [23:0]  dma_address,
+    input               dma_16bit,
     input               dma_write,
-    input        [7:0]  dma_writedata,
+    input       [15:0]  dma_writedata,
     input               dma_read,
-    output       [7:0]  dma_readdata,
+    output      [15:0]  dma_readdata,
     output              dma_readdatavalid,
     output              dma_waitrequest
 );
@@ -281,6 +282,8 @@ wire [31:0]  tlbwrite_data;
 
 //------------------------------------------------------------------------------
 
+wire        reset_prefetch;
+
 wire        icacheread_do;
 wire [31:0] icacheread_address;
 wire [4:0]  icacheread_length; // takes into account: page size and cs segment limit
@@ -300,6 +303,7 @@ wire [4:0]      prefetched_length;
 wire [31:0]     prefetch_address;
 wire [4:0]      prefetch_length;
 wire            prefetch_su;
+wire [31:0]     delivered_eip;
 
 //------------------------------------------------------------------------------
 
@@ -377,6 +381,7 @@ avalon_mem avalon_mem_inst(
     .avm_readdata               (avm_readdata),                 //input [31:0]
 
     .dma_address                (dma_address),
+    .dma_16bit                  (dma_16bit),
     .dma_write                  (dma_write),
     .dma_writedata              (dma_writedata),
     .dma_read                   (dma_read),
@@ -392,13 +397,17 @@ assign wbinvddata_done = 1'b1;
 
 //------------------------------------------------------------------------------
 icache icache_inst(
-    .clk            (clk),
-    .rst_n          (rst_n),
+    .clk                        (clk),
+    .rst_n                      (rst_n),
+                                
+    .cache_disable              (cache_disable),
+                                
+    //RESP:                     
+    .pr_reset                   (pr_reset),                   //input
     
-    .cache_disable  (cache_disable),
-
-    //RESP:
-    .pr_reset       (pr_reset),   //input
+    .prefetch_address           (prefetch_address),           //input
+    .delivered_eip              (delivered_eip),              //input
+    .reset_prefetch             (reset_prefetch),             //output
     //END
     
     //RESP:
@@ -407,11 +416,11 @@ icache icache_inst(
     .icacheread_length          (icacheread_length),          //input [4:0] // takes into account: page size and cs segment limit
     
     //REQ:
-    .readcode_do                (req_readcode_do),              //output
-    .readcode_done              (req_readcode_done),            //input
+    .readcode_do                (req_readcode_do),            //output
+    .readcode_done              (req_readcode_done),          //input
     
-    .readcode_address           (req_readcode_address),         //output [31:0]
-    .readcode_partial           (req_readcode_partial),         //input [31:0]
+    .readcode_address           (req_readcode_address),       //output [31:0]
+    .readcode_partial           (req_readcode_partial),       //input [31:0]
     //END
     
     //REQ:
@@ -420,8 +429,8 @@ icache icache_inst(
     //END
     
     //REQ:
-    .prefetched_do              (prefetched_do),      //output
-    .prefetched_length          (prefetched_length),  //output [4:0]
+    .prefetched_do              (prefetched_do),              //output
+    .prefetched_length          (prefetched_length),          //output [4:0]
     //END
     
     .snoop_addr                 (snoop_addr),
@@ -520,7 +529,8 @@ prefetch prefetch_inst(
     .clk                (clk),
     .rst_n              (rst_n),
     
-    .pr_reset       (pr_reset),   //input
+    .pr_reset           (pr_reset),   //input
+    .reset_prefetch     (reset_prefetch),   //input
     
     // prefetch exported
     .prefetch_cpl   (prefetch_cpl),        //input [1:0]
@@ -535,10 +545,14 @@ prefetch prefetch_inst(
     //RESP:
     .prefetched_do      (prefetched_do),      //input
     .prefetched_length  (prefetched_length),  //input [4:0]
+    
+    .prefetched_accept_do(prefetchfifo_accept_do),              //input
+    .prefetched_accept_length(prefetchfifo_accept_data[67:64]), //input [3:0]
     //END
 
     //REQ:
-    .prefetchfifo_signal_limit_do   (prefetchfifo_signal_limit_do)    //output
+    .prefetchfifo_signal_limit_do   (prefetchfifo_signal_limit_do),   //output
+    .delivered_eip                  (delivered_eip)                   //output
     //END
 );
 
@@ -548,7 +562,7 @@ prefetch_fifo prefetch_fifo_inst(
     .clk            (clk),
     .rst_n          (rst_n),
     
-    .pr_reset       (pr_reset),   //input
+    .pr_reset       (pr_reset | reset_prefetch),   //input
     
     //RESP:
     .prefetchfifo_signal_limit_do    (prefetchfifo_signal_limit_do), //input
@@ -579,7 +593,7 @@ prefetch_control prefetch_control_inst(
     .clk                    (clk),
     .rst_n                  (rst_n),
     
-    .pr_reset       (pr_reset), //input //same as reset to icache
+    .pr_reset       (pr_reset | reset_prefetch), //input //same as reset to icache
     
     //REQ:
     .tlbcoderequest_do       (tlbcoderequest_do),      //output

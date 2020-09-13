@@ -164,7 +164,7 @@ assign VIDEO_ARY = status[1] ? 8'd9  : 8'd3;
 
 assign LED_DISK[1] = 0;
 assign LED_POWER   = 0;
-assign BUTTONS   = 0;
+assign BUTTONS     = {~ps2_reset_n, 1'b0};
 
 led hdd_led(clk_sys, |mgmt_req[5:0], LED_DISK[0]);
 led fdd_led(clk_sys, |mgmt_req[7:6], LED_USER);
@@ -399,10 +399,10 @@ always @(posedge CLK_50M) begin
 			if(state) state<=state+1'd1;
 			case(state)
 				0: begin
-						old_rst <= cpu_reset;
+						old_rst <= reset;
 						old_speed <= speed;
 						old_uspeed <= uspeed;
-						if((old_speed != speed) || (old_uspeed != uspeed) || (old_rst & ~cpu_reset)) state <= 1;
+						if((old_speed != speed) || (old_uspeed != uspeed) || (old_rst & ~reset)) state <= 1;
 					end
 				1: begin
 						cfg_address <= 0;
@@ -576,8 +576,7 @@ system system
 	.clk_uart             (clk_uart),
 	.clk_vga              (clk_vga),
 
-	.reset_sys            (sys_reset),
-	.reset_cpu            (cpu_reset),
+	.reset                (reset),
 
 	.clock_rate           (cur_rate),
 
@@ -668,34 +667,20 @@ system system
 );
 
 wire [7:0] syscfg;
+wire       ps2_reset_n;
 
 reg memcfg = 0;
-always @(posedge clk_sys) if(cpu_reset) memcfg <= status[11];
+always @(posedge clk_sys) if(reset) memcfg <= status[11];
 
-reg cpu_reset;
-always @(posedge clk_sys) cpu_reset <= cpu_rst1 | sys_reset;
-
-wire ps2_reset_n;
-wire sys_reset = rst_q[7] | ~init_reset_n | RESET;
-
-reg  cpu_rst1 = 0;
-reg  init_reset_n = 0;
-
-reg  [7:0] rst_q;
+reg reset;
 always @(posedge clk_sys) begin
-	reg  old_rst1 = 0;
-	reg  old_rst2 = 0;
+	reg init_reset_n = 0;
+	reg old_rst = 0;
 
-	old_rst1 <= status[0];
-	old_rst2 <= old_rst1;
+	reset <= buttons[1] | status[0] | RESET | ~init_reset_n;
 
-	cpu_rst1 <= buttons[1] | status[0] | ~ps2_reset_n;
-
-	rst_q <= rst_q << 1;
-	if(~old_rst2 & old_rst1) begin
-		rst_q <= '1;
-		init_reset_n <= 1;
-	end
+	old_rst <= status[0];
+	if(old_rst & ~status[0]) init_reset_n <= 1;
 end
 
 reg dbg_menu = 0;
@@ -737,7 +722,7 @@ function [15:0] compr; input [15:0] inp;
 		v  = inp[15] ? (~inp) + 1'd1 : inp;
 		v1 = (v < comp_x1[15:0]) ? (v * comp_a1) : (((v - comp_x1[15:0])/comp_f1) + comp_b1[15:0]);
 		v2 = (v < comp_x2[15:0]) ? (v * comp_a2) : (((v - comp_x2[15:0])/comp_f2) + comp_b2[15:0]);
-		v  = boost4x ? v2 : v1;
+		v  = status[21] ? v2 : v1;
 		compr = inp[15] ? ~(v-1'd1) : v;
 	end
 endfunction 
@@ -751,7 +736,6 @@ always @(posedge clk_sys) begin
 	cmp_r <= compr(out_r);
 end
 
-wire   boost4x   = status[21];
 assign AUDIO_L   = status[21:20] ? cmp_l : out_l;
 assign AUDIO_R   = status[21:20] ? cmp_r : out_r;
 assign AUDIO_S   = 1;
